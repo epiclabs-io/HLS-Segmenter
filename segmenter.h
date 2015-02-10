@@ -29,7 +29,7 @@ extern "C" {
 
 #include <stdlib.h>
 
-#define PROGRAM_VERSION "0.2"
+#define PROGRAM_VERSION "0.2.1"
 
 #define MAX_SEGMENTS 2048
 #define MAX_FILENAME_LENGTH 1024
@@ -50,7 +50,7 @@ extern "C" {
 void printBanner();
 void printUsage();
 int parseCommandLine(
-	   int argc, const char* argv[], char* inputFile, char* outputFile, char* baseDir, char* baseName, char* baseExtension, int* segmentLength, int* listlen, int* quiet, int* version, int* usage
+	   int argc, const char* argv[], char* inputFile, char* outputFile, char* baseDir, char* baseName, char* baseExtension, int* segmentLength, int* listlen, int* quiet, int* version, int* usage, char *cmd, int *removeExpired
 	
 );
 

@@ -32,7 +32,7 @@
 #include "segmenter.h"
 //Type of options detected
 typedef enum {
-	INPUT_FILE, OUTPUT_FILE, OUTPUT_DIR, OUTPUT_BASE_NAME,SEGMENT_LENGTH, LIST_LENGTH,
+	INPUT_FILE, OUTPUT_FILE, OUTPUT_DIR, OUTPUT_BASE_NAME,SEGMENT_LENGTH, LIST_LENGTH, ON_GENERATION_CMD, REMOVE_EXPIRED,
 	
 	QUIET, VERSION, PRINT_USAGE,
 	
@@ -64,9 +64,15 @@ void printUsage() {
 					"-f <baseFileName>\tSegment files will be named <baseFileName>-#. Default is <outfile>\n"
 					"-l <segment length>\tThe length of each segment. Default is 5\n"
 					"-m <maximal list length>\tThe length of produced list. Default is - no limit. \"Hard\"  limit  at %u\n"
+					"-c <cmd>\t\tExecute <cmd> as system command when index or media files are generated\n"
+					"-D\t\t\tDelete segment files after they expire\n"
 					"--version\t\tPrint version details and exit.\n"
 					"-q,--quiet\t\tTry to be more quiet.\n"
 					"-h,--help\t\tPrint this info.\n"
+					"\n\n"
+					"For the command that generate system commands, use %%P to indicate complete file path, and %%F for just the file name\n"
+					"For example, 'echo %%P %%F' for index /Volumes/Data/Foo/bar/none.m3u8 will generate the command:\n"
+					"echo /Volumes/Data/Foo/bar/none.m3u8 none.m3u8"
 					"\n\n",MAX_SEGMENTS);
 }
 
@@ -212,13 +218,35 @@ inputOption getNextOption(int argc, const char * argv[], char * option, int *opt
 			return INVALID;
 		}
 
-		if (a <= 3) {
-			fprintf(stderr, "ERROR: list list must be > 3.\n");
+		if (a <= 2) {
+			fprintf(stderr, "ERROR: list list must be >= 3.\n");
 			return INVALID;
 		}
 		if (optioni) *optioni=a;
 		optionIndex++;
 		return LIST_LENGTH;
+	}
+
+	if (strcmp(argv[optionIndex],"-c")==0 || strcmp(argv[optionIndex],"--c")==0) {
+		if (!hasnext){
+			fprintf(stderr,"ERROR: command line should be provided after -c\n");
+			return INVALID;
+		}		
+		strncpy(option, argv[++optionIndex], MAX_FILENAME_LENGTH );
+
+		//check for valid file name
+		if (!isalpha(option[0]) && !isdigit(option[0]) && option[0] != '-' && option[0] != '/' && option[0] != '.') {
+			fprintf(stderr,"ERROR: command line must start with alpha, digit, / or . \n");
+			return INVALID;
+		}
+
+		optionIndex++;
+		return ON_GENERATION_CMD;
+	}
+
+	if (strcmp(argv[optionIndex],"-D")==0 ) {
+		optionIndex++;
+		return REMOVE_EXPIRED;
 	}
 
 	if (strcmp(argv[optionIndex],"--version")==0 ) {
@@ -248,7 +276,7 @@ int parseCommandLine(
 	
 	char * inputFile, char * outputFile, char * baseDir, char * baseName, char * baseExtension, int * segmentLength, int *listlen,
 	
-	int * quiet, int * version, int * usage
+	int * quiet, int * version, int * usage, char *cmd, int *removeExpired
 	
 ) {
 	printBanner();
@@ -264,6 +292,8 @@ int parseCommandLine(
 	*segmentLength=5;
 	strncpy(baseExtension, ".ts",MAXT_EXT_LENGTH);
 	baseDir[0]='.';baseDir[1]=0;
+	*removeExpired = 0;
+	cmd[0] = 0;
 	*listlen=-1;
 	
 	while (1) {
@@ -276,6 +306,9 @@ int parseCommandLine(
 			case OUTPUT_FILE:
 				strncpy(outputFile, option, MAX_FILENAME_LENGTH);
 				requiredOptions[OUTPUT_FILE_INDEX] = 1;
+				break;
+			case ON_GENERATION_CMD:
+				strncpy(cmd, option, MAX_FILENAME_LENGTH);
 				break;
 			case OUTPUT_DIR:
 				strncpy(baseDir, option, MAX_FILENAME_LENGTH);
@@ -296,6 +329,9 @@ int parseCommandLine(
 				break;
 			case PRINT_USAGE:
 				*usage = 1;
+				break;
+			case REMOVE_EXPIRED:
+				*removeExpired = 1;
 				break;
 			case NO_MORE_OPTIONS:
 			{

@@ -102,10 +102,55 @@ static AVStream *add_output_stream(AVFormatContext *output_format_context, AVStr
     return output_stream;
 }
 
+// Used to replace variables in the string
+void replace_str(char *str, const char *string_to_replace, const char *replacement)
+{
+    char res[PATH_MAX];
+    char *pBuffer;
+    
+    if(!(pBuffer = strstr(str, string_to_replace)))
+        return;
+    
+    strncpy(res, str, pBuffer-str);
+    res[pBuffer-str] = '\0';
+    
+    strcat(res, replacement);
+    strcat(res, pBuffer+strlen(string_to_replace));
+    
+    // Copy the final result to the passed string
+    strcpy(str, res);
+}
+
+// Called when a new file (segment) is generated
+void onFileGenerated(const char *output_filepath, const char *cmd)
+{
+    char *filename[PATH_MAX] = {0};
+    char expanded_cmd[PATH_MAX] = {0};
+
+    // Do the variables replacement and execute the command
+    if(cmd != NULL && strlen(cmd) > 0)
+    {
+        // Get filename from path
+        char *p = strrchr(output_filepath, '/');
+        if(p == NULL)
+            strcpy((char *)filename, output_filepath);
+        else
+            strcpy((char *)filename, p+1);
+        
+        strcpy(expanded_cmd, cmd);
+        replace_str(expanded_cmd, "%P", output_filepath);
+        replace_str(expanded_cmd, "%F", (char *)filename);
+        system(expanded_cmd);
+        
+        printf("Segmenter - Executing %s\n\r", expanded_cmd);
+    }
+
+}
+
 int write_index_file(
 		const char *index, const char *tmp_index, 
 		unsigned int planned_segment_duration,unsigned int numsegments, unsigned int *actual_segment_duration, unsigned int segment_number_offset, 
-        const char *output_prefix, const char *output_file_extension,int islast
+        const char *output_prefix, const char *output_file_extension,int islast, char *cmdOnGen
 ) {
 	if (numsegments<1) return 0;
 	FILE *tmp_index_fp;
@@ -143,8 +188,14 @@ int write_index_file(
 	}
 	fclose(tmp_index_fp);
 
-    return rename(tmp_index, index);
+    int result = rename(tmp_index, index);
+
+    onFileGenerated(index, cmdOnGen);
+
+    return result;
 }
+
+
 
 int main(int argc, const char *argv[]) {
 	//input parameters
@@ -152,6 +203,7 @@ int main(int argc, const char *argv[]) {
 	FNHOLDER(playlistFilename);
 	FNHOLDER(baseDirName);
 	FNHOLDER(baseFileName);
+	FNHOLDER(cmdLineOnGen);
 
 
 	char baseFileExtension[MAXT_EXT_LENGTH+1];baseFileExtension[MAXT_EXT_LENGTH]=0; //either "ts", "aac" or "mp3"
@@ -189,7 +241,9 @@ int main(int argc, const char *argv[]) {
 	int i;
 	int listlen;
 	int listofs=1;
-	if ( parseCommandLine(argc, argv,inputFilename, playlistFilename, baseDirName, baseFileName, baseFileExtension, &segmentLength, &listlen, &quiet, &version,&usage) != 0)
+	int removeExpired = 0;
+
+	if ( parseCommandLine(argc, argv,inputFilename, playlistFilename, baseDirName, baseFileName, baseFileExtension, &segmentLength, &listlen, &quiet, &version,&usage, cmdLineOnGen, &removeExpired) != 0)
 		return 0;
 
 	if (usage) printUsage();
@@ -354,21 +408,32 @@ int main(int argc, const char *argv[]) {
 		if (iskeyframe &&  packet_time - segment_start_time >= segmentLength - 0.25) { //a keyframe  near or past segmentLength -> SPLIT
 			avio_flush(oc->pb);
 			avio_close(oc->pb);
+
+			// Notify a new file has been generated
+			onFileGenerated(currentOutputFileName, cmdLineOnGen);
+
+
 			actual_segment_durations[num_segments] = (unsigned int) rint(prev_packet_time - segment_start_time);
 			num_segments++;
 			if (num_segments>listlen) { //move list to exclude last:
 				snprintf(currentOutputFileName, MAX_FILENAME_LENGTH, "%s/%s-%u%s", baseDirName, baseFileName, listofs, baseFileExtension);
-				unlink (currentOutputFileName);
+
+				if(removeExpired)
+				{
+					unlink (currentOutputFileName);
+				}
 				listofs++; num_segments--;
 				memmove(actual_segment_durations,actual_segment_durations+1,num_segments*sizeof(actual_segment_durations[0]));
 				
 			}
-			write_index_file(playlistFilename, tempPlaylistName, segmentLength, num_segments,actual_segment_durations, listofs,  baseFileName, baseFileExtension, (num_segments>=MAX_SEGMENTS));
+			write_index_file(playlistFilename, tempPlaylistName, segmentLength, num_segments,actual_segment_durations, listofs,  baseFileName, baseFileExtension, (num_segments>=MAX_SEGMENTS), cmdLineOnGen);
 
 			if (num_segments==MAX_SEGMENTS) {
 				fprintf(stderr, "Reached \"hard\" max segment number %u. If this is not live stream increase segment duration. If live segmenting set max list lenth (-m ...)\n", MAX_SEGMENTS);
 				break;
 			}
+
+
 			//struct stat st;
 			//stat(currentOutputFileName, &st);
 			//output_bytes += st.st_size;
@@ -409,11 +474,14 @@ int main(int argc, const char *argv[]) {
 
 		avio_close(oc->pb);
 		av_free(oc);
+
+		// Notify a new file has been generated
+		onFileGenerated(currentOutputFileName, cmdLineOnGen);
 		
 		actual_segment_durations[num_segments] = (unsigned int) rint(packet_time - segment_start_time);
 		if (actual_segment_durations[num_segments] == 0)   actual_segment_durations[num_segments] = 1;
 		num_segments++;
-		write_index_file(playlistFilename, tempPlaylistName, segmentLength, num_segments,actual_segment_durations, listofs,  baseFileName, baseFileExtension, 1);
+		write_index_file(playlistFilename, tempPlaylistName, segmentLength, num_segments,actual_segment_durations, listofs,  baseFileName, baseFileExtension, 1, cmdLineOnGen);
 	}
 // 	struct stat st;
 // 	stat(currentOutputFileName, &st);
