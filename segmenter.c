@@ -415,7 +415,7 @@ int main(int argc, const char *argv[]) {
 
 			actual_segment_durations[num_segments] = (unsigned int) rint(prev_packet_time - segment_start_time);
 			num_segments++;
-			if (num_segments>listlen) { //move list to exclude last:
+			if (num_segments>=listlen) { //move list to exclude last:
 				snprintf(currentOutputFileName, MAX_FILENAME_LENGTH, "%s/%s-%u%s", baseDirName, baseFileName, listofs, baseFileExtension);
 
 				if(removeExpired)
